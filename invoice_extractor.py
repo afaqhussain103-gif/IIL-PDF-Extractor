@@ -1,356 +1,558 @@
-"""
-IIL Invoice Extractor v1.0
-Extracts invoices by customer name or account ID
-"""
+"""IIL Invoice Extractor v2.2 - Official Branded Edition"""
 
+import os
+import shutil
+import fitz  # PyMuPDF
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-import os
+from datetime import datetime
+from tkcalendar import DateEntry
 import re
-import threading
 
-try:
-    import fitz  # PyMuPDF
-except ImportError:
-    import subprocess
-    import sys
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "PyMuPDF"])
-    import fitz
-
-class InvoiceExtractorApp:
+class IILInvoiceExtractor:
     def __init__(self, root):
         self.root = root
-        self.root.title("IIL Invoice Extractor v1.0")
-        self.root.geometry("700x550")
+        self.root.title("IIL Invoice Extractor v2.2")
+        self.root.geometry("820x750")
         self.root.resizable(False, False)
         
-        self.source_folder = tk.StringVar()
-        self.dest_folder = tk.StringVar()
-        self.customer_filter = tk.StringVar()
-        self.filter_type = tk.StringVar(value="name")
-        
-        self.create_widgets()
-        
-    def create_widgets(self):
-        header = tk.Label(
-            self.root, 
-            text="IIL Invoice Extractor", 
-            font=("Arial", 16, "bold"),
-            bg="#2c3e50",
-            fg="white",
-            pady=10
-        )
-        header.pack(fill=tk.X)
-        
-        main_frame = tk.Frame(self.root, padx=20, pady=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        tk.Label(main_frame, text="📁 Invoice Folder (Source):", font=("Arial", 10, "bold")).grid(
-            row=0, column=0, sticky=tk.W, pady=(0, 5)
-        )
-        
-        source_frame = tk.Frame(main_frame)
-        source_frame.grid(row=1, column=0, columnspan=3, sticky=tk.EW, pady=(0, 15))
-        
-        tk.Entry(source_frame, textvariable=self.source_folder, width=60, state="readonly").pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10)
-        )
-        tk.Button(source_frame, text="Browse", command=self.browse_source, width=10).pack(side=tk.LEFT)
-        
-        tk.Label(main_frame, text="📂 Delivery Folder (Destination):", font=("Arial", 10, "bold")).grid(
-            row=2, column=0, sticky=tk.W, pady=(0, 5)
-        )
-        
-        dest_frame = tk.Frame(main_frame)
-        dest_frame.grid(row=3, column=0, columnspan=3, sticky=tk.EW, pady=(0, 15))
-        
-        tk.Entry(dest_frame, textvariable=self.dest_folder, width=60, state="readonly").pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10)
-        )
-        tk.Button(dest_frame, text="Browse", command=self.browse_dest, width=10).pack(side=tk.LEFT)
-        
-        tk.Label(main_frame, text="🔍 Customer Filter:", font=("Arial", 10, "bold")).grid(
-            row=4, column=0, sticky=tk.W, pady=(0, 5)
-        )
-        
-        tk.Entry(main_frame, textvariable=self.customer_filter, width=60).grid(
-            row=5, column=0, columnspan=3, sticky=tk.EW, pady=(0, 15)
-        )
-        
-        filter_frame = tk.Frame(main_frame)
-        filter_frame.grid(row=6, column=0, columnspan=3, sticky=tk.W, pady=(0, 20))
-        
-        tk.Label(filter_frame, text="Filter By:", font=("Arial", 10)).pack(side=tk.LEFT, padx=(0, 10))
-        tk.Radiobutton(filter_frame, text="Customer Name", variable=self.filter_type, value="name").pack(side=tk.LEFT, padx=5)
-        tk.Radiobutton(filter_frame, text="Account ID", variable=self.filter_type, value="id").pack(side=tk.LEFT, padx=5)
-        
-        self.progress = ttk.Progressbar(main_frame, mode='indeterminate')
-        self.progress.grid(row=7, column=0, columnspan=3, sticky=tk.EW, pady=(0, 10))
-        
-        self.status_label = tk.Label(main_frame, text="Ready to extract invoices", font=("Arial", 9), fg="gray")
-        self.status_label.grid(row=8, column=0, columnspan=3, sticky=tk.W, pady=(0, 15))
-        
-        self.extract_btn = tk.Button(
-            main_frame,
-            text="🚀 Extract Invoices",
-            command=self.start_extraction,
-            font=("Arial", 12, "bold"),
-            bg="#27ae60",
-            fg="white",
-            height=2,
-            cursor="hand2"
-        )
-        self.extract_btn.grid(row=9, column=0, columnspan=3, sticky=tk.EW)
-        
-        main_frame.columnconfigure(0, weight=1)
-        
-    def browse_source(self):
-        folder = filedialog.askdirectory(title="Select Invoice Folder")
-        if folder:
-            self.source_folder.set(folder)
-            
-    def browse_dest(self):
-        folder = filedialog.askdirectory(title="Select Delivery Folder")
-        if folder:
-            self.dest_folder.set(folder)
-            
-    def start_extraction(self):
-        if not self.source_folder.get():
-            messagebox.showerror("Error", "Please select an invoice folder!")
-            return
-        if not self.dest_folder.get():
-            messagebox.showerror("Error", "Please select a delivery folder!")
-            return
-        if not self.customer_filter.get():
-            messagebox.showerror("Error", "Please enter a customer name or account ID!")
-            return
-            
-        self.extract_btn.config(state=tk.DISABLED)
-        self.progress.start()
-        self.status_label.config(text="Processing invoices...", fg="blue")
-        
-        thread = threading.Thread(target=self.extract_invoices)
-        thread.daemon = True
-        thread.start()
-        
-    def extract_invoices(self):
-        try:
-            source = self.source_folder.get()
-            dest = self.dest_folder.get()
-            customer = self.customer_filter.get().strip()
-            filter_by = self.filter_type.get()
-            
-            pdf_files = [f for f in os.listdir(source) if f.lower().endswith('.pdf')]
-            
-            if not pdf_files:
-                self.show_result("No PDF files found in source folder!", "error")
-                return
-            
-            matched_invoices = []
-            total_invoices = 0
-            customer_upper = customer.upper()
-            
-            for pdf_file in pdf_files:
-                pdf_path = os.path.join(source, pdf_file)
-                
-                try:
-                    doc = fitz.open(pdf_path)
-                    current_invoice_pages = []
-                    current_invoice_data = None
-                    
-                    for page_num in range(len(doc)):
-                        text = doc[page_num].get_text()
-                        
-                        if "Invoice Details" in text and "Number" in text:
-                            total_invoices += 1
-                            
-                            if current_invoice_pages and current_invoice_data:
-                                if self.is_match(current_invoice_data, customer_upper, filter_by):
-                                    matched_invoices.append({
-                                        'data': current_invoice_data,
-                                        'pages': current_invoice_pages.copy(),
-                                        'source_doc': pdf_path
-                                    })
-                            
-                            current_invoice_pages = [page_num]
-                            current_invoice_data = self.extract_metadata(text)
-                        
-                        elif current_invoice_pages:
-                            current_invoice_pages.append(page_num)
-                    
-                    if current_invoice_pages and current_invoice_data:
-                        if self.is_match(current_invoice_data, customer_upper, filter_by):
-                            matched_invoices.append({
-                                'data': current_invoice_data,
-                                'pages': current_invoice_pages.copy(),
-                                'source_doc': pdf_path
-                            })
-                    
-                    doc.close()
-                    
-                except Exception as e:
-                    print(f"Error processing {pdf_file}: {str(e)}")
-            
-            created_files = []
-            
-            for invoice_info in matched_invoices:
-                metadata = invoice_info['data']
-                pages = invoice_info['pages']
-                source_doc = invoice_info['source_doc']
-                
-                clean_customer = re.sub(r'[<>:"/\\|?*]', '', metadata['customer_name'])[:50]
-                filename = f"INV-{metadata['invoice_num']}-{metadata['date']}-{clean_customer}.pdf"
-                output_path = os.path.join(dest, filename)
-                
-                source = fitz.open(source_doc)
-                output = fitz.open()
-                
-                for page_num in pages:
-                    output.insert_pdf(source, from_page=page_num, to_page=page_num)
-                
-                output.save(output_path)
-                output.close()
-                source.close()
-                
-                created_files.append(filename)
-            
-            self.show_summary(len(pdf_files), total_invoices, len(matched_invoices), created_files, dest)
-            
-        except Exception as e:
-            self.show_result(f"Error: {str(e)}", "error")
-    
-    def extract_metadata(self, text):
-        invoice_num_match = re.search(r'Number\s+([A-Z]{2,5}\d{2}-\d{7})', text)
-        if not invoice_num_match:
-            invoice_num_match = re.search(r'Number\s+([A-Z0-9\-]+)', text)
-        invoice_num = invoice_num_match.group(1) if invoice_num_match else "UNKNOWN"
-        
-        date_match = re.search(r'Date\s+(\d{2}-[A-Z]{3}-\d{4})', text)
-        invoice_date = date_match.group(1) if date_match else "NODATE"
-        
-        customer_name_match = re.search(r'Name\s+(.+?)(?:\n|Address)', text, re.DOTALL)
-        if customer_name_match:
-            customer_name = customer_name_match.group(1).strip()
-            customer_name = ' '.join(customer_name.split())
-        else:
-            customer_name = "UNKNOWN_CUSTOMER"
-        
-        account_match = re.search(r'Account\s+(\d+)', text)
-        account_id = account_match.group(1) if account_match else "NO_ID"
-        
-        return {
-            'invoice_num': invoice_num,
-            'date': invoice_date,
-            'customer_name': customer_name,
-            'account_id': account_id
+        # OFFICIAL IIL BRAND COLORS (FINAL CORRECTED)
+        self.colors = {
+            'green': '#01783f',        # IIL Primary Green
+            'yellow': '#c2d501',       # IIL Primary Yellow-Green
+            'accent': '#76690f',       # IIL Accent Olive (CORRECTED)
+            'white': '#ffffff',        # Primary White
+            'bg': '#f8f9fa',           # Light Background
+            'text': '#2c3e50',         # Dark Text
+            'gray': '#6c757d'          # Secondary Gray
         }
-    
-    def is_match(self, invoice_data, customer_filter, filter_by):
-        if filter_by == "name":
-            return customer_filter in invoice_data['customer_name'].upper()
-        else:
-            return customer_filter == invoice_data['account_id']
-    
-    def show_summary(self, total_files, total_invoices, matched, created_files, dest_folder):
-        self.root.after(0, lambda: self._show_summary_window(total_files, total_invoices, matched, created_files, dest_folder))
-    
-    def _show_summary_window(self, total_files, total_invoices, matched, created_files, dest_folder):
-        self.progress.stop()
-        self.extract_btn.config(state=tk.NORMAL)
-        self.status_label.config(text="Ready to extract invoices", fg="gray")
         
-        summary_win = tk.Toplevel(self.root)
-        summary_win.title("Extraction Complete")
-        summary_win.geometry("600x500")
-        summary_win.resizable(False, False)
-        
-        header = tk.Label(
-            summary_win,
-            text="✅ EXTRACTION COMPLETE!",
-            font=("Arial", 14, "bold"),
-            bg="#27ae60",
-            fg="white",
-            pady=15
-        )
+        self.root.configure(bg=self.colors['white'])
+        self.setup_ui()
+    
+    def setup_ui(self):
+        # ═══════════════════════════════════════════════════════════
+        # HEADER - IIL GREEN WITH WHITE TEXT
+        # ═══════════════════════════════════════════════════════════
+        header = tk.Frame(self.root, bg=self.colors['green'], height=110)
         header.pack(fill=tk.X)
+        header.pack_propagate(False)
         
-        summary_frame = tk.Frame(summary_win, padx=20, pady=20)
-        summary_frame.pack(fill=tk.BOTH, expand=True)
+        # Company Name
+        tk.Label(
+            header,
+            text="INTERNATIONAL INDUSTRIES LIMITED",
+            font=('Arial', 20, 'bold'),
+            bg=self.colors['green'],
+            fg=self.colors['white']
+        ).pack(pady=(22, 2))
         
-        summary_text = f"""
-📊 Summary:
-────────────────────────────────
-• Processed: {total_files} PDF file(s)
-• Total invoices found: {total_invoices}
-• Extracted for {self.customer_filter.get()}: {matched}
-
-📄 Created Files:
-────────────────────────────────
-"""
+        # Tagline with Yellow-Green
+        tk.Label(
+            header,
+            text="Building Pakistan's Future | Invoice Management System",
+            font=('Arial', 10),
+            bg=self.colors['green'],
+            fg=self.colors['yellow']
+        ).pack(pady=2)
         
-        tk.Label(summary_frame, text=summary_text, font=("Courier", 10), justify=tk.LEFT).pack(anchor=tk.W)
+        # Version Badge (using yellow-green primary)
+        version_frame = tk.Frame(header, bg=self.colors['yellow'], padx=12, pady=3)
+        version_frame.place(relx=0.95, rely=0.15, anchor='ne')
+        tk.Label(
+            version_frame,
+            text="v2.2",
+            font=('Arial', 8, 'bold'),
+            bg=self.colors['yellow'],
+            fg=self.colors['text']
+        ).pack()
         
-        list_frame = tk.Frame(summary_frame)
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        # ═══════════════════════════════════════════════════════════
+        # MAIN CONTENT AREA
+        # ═══════════════════════════════════════════════════════════
+        main = tk.Frame(self.root, bg=self.colors['white'])
+        main.pack(fill=tk.BOTH, expand=True, padx=40, pady=25)
         
-        scrollbar = tk.Scrollbar(list_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # ───────────────────────────────────────────────────────────
+        # SOURCE FOLDER
+        # ───────────────────────────────────────────────────────────
+        self.create_section_header(main, "📁 SOURCE FOLDER (Invoices)", 0)
+        self.source_entry = self.create_folder_input(main, 1, self.browse_source)
         
-        files_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, font=("Courier", 9))
-        files_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=files_listbox.yview)
+        # ───────────────────────────────────────────────────────────
+        # DESTINATION FOLDER
+        # ───────────────────────────────────────────────────────────
+        self.create_section_header(main, "📂 DESTINATION FOLDER (Output)", 2)
+        self.dest_entry = self.create_folder_input(main, 3, self.browse_destination)
         
-        for idx, filename in enumerate(created_files, 1):
-            files_listbox.insert(tk.END, f"✓ {filename}")
+        # Separator
+        self.create_separator(main, 4)
         
-        btn_frame = tk.Frame(summary_frame)
-        btn_frame.pack(pady=(20, 0))
+        # ───────────────────────────────────────────────────────────
+        # FILTER TYPE
+        # ───────────────────────────────────────────────────────────
+        self.create_section_header(main, "🔍 FILTER TYPE", 5)
         
-        tk.Button(
-            btn_frame,
-            text="📂 Open Folder",
-            command=lambda: os.startfile(dest_folder),
-            font=("Arial", 11, "bold"),
-            bg="#3498db",
-            fg="white",
-            width=15,
-            height=2,
-            cursor="hand2"
-        ).pack(side=tk.LEFT, padx=5)
+        filter_frame = tk.Frame(main, bg=self.colors['white'])
+        filter_frame.grid(row=6, column=0, columnspan=3, sticky='w', pady=5)
         
-        tk.Button(
-            btn_frame,
-            text="Close",
-            command=summary_win.destroy,
-            font=("Arial", 11),
-            width=15,
-            height=2,
-            cursor="hand2"
-        ).pack(side=tk.LEFT, padx=5)
+        self.filter_var = tk.StringVar(value="name")
         
-        if not created_files:
+        tk.Radiobutton(
+            filter_frame,
+            text="Customer Name",
+            variable=self.filter_var,
+            value="name",
+            font=('Arial', 10),
+            bg=self.colors['white'],
+            fg=self.colors['text'],
+            selectcolor=self.colors['yellow'],
+            activebackground=self.colors['white']
+        ).pack(side=tk.LEFT, padx=(0, 30))
+        
+        tk.Radiobutton(
+            filter_frame,
+            text="Account ID",
+            variable=self.filter_var,
+            value="account",
+            font=('Arial', 10),
+            bg=self.colors['white'],
+            fg=self.colors['text'],
+            selectcolor=self.colors['yellow'],
+            activebackground=self.colors['white']
+        ).pack(side=tk.LEFT)
+        
+        # ───────────────────────────────────────────────────────────
+        # SEARCH VALUE
+        # ───────────────────────────────────────────────────────────
+        self.create_section_header(main, "🔎 SEARCH VALUE", 7)
+        
+        self.search_entry = tk.Entry(
+            main,
+            font=('Arial', 11),
+            bd=0,
+            relief=tk.FLAT,
+            highlightthickness=2,
+            highlightbackground=self.colors['bg'],
+            highlightcolor=self.colors['green']
+        )
+        self.search_entry.grid(row=8, column=0, columnspan=3, sticky='ew', pady=5, ipady=10)
+        
+        # Separator
+        self.create_separator(main, 9)
+        
+        # ───────────────────────────────────────────────────────────
+        # DATE RANGE
+        # ───────────────────────────────────────────────────────────
+        self.create_section_header(main, "📅 DATE RANGE FILTER (Optional)", 10)
+        
+        date_frame = tk.Frame(main, bg=self.colors['white'])
+        date_frame.grid(row=11, column=0, columnspan=3, sticky='w', pady=8)
+        
+        # From Date
+        tk.Label(
+            date_frame,
+            text="From:",
+            font=('Arial', 10, 'bold'),
+            bg=self.colors['white'],
+            fg=self.colors['text']
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        
+        self.from_date = DateEntry(
+            date_frame,
+            width=17,
+            font=('Arial', 10),
+            date_pattern='dd/mm/yyyy',
+            background=self.colors['green'],
+            foreground=self.colors['white'],
+            borderwidth=2,
+            headersbackground=self.colors['green'],
+            headersforeground=self.colors['white'],
+            selectbackground=self.colors['accent'],
+            selectforeground=self.colors['white']
+        )
+        self.from_date.pack(side=tk.LEFT, padx=(0, 35))
+        
+        # To Date
+        tk.Label(
+            date_frame,
+            text="To:",
+            font=('Arial', 10, 'bold'),
+            bg=self.colors['white'],
+            fg=self.colors['text']
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        
+        self.to_date = DateEntry(
+            date_frame,
+            width=17,
+            font=('Arial', 10),
+            date_pattern='dd/mm/yyyy',
+            background=self.colors['green'],
+            foreground=self.colors['white'],
+            borderwidth=2,
+            headersbackground=self.colors['green'],
+            headersforeground=self.colors['white'],
+            selectbackground=self.colors['accent'],
+            selectforeground=self.colors['white']
+        )
+        self.to_date.pack(side=tk.LEFT)
+        
+        # ───────────────────────────────────────────────────────────
+        # OPTIONS CHECKBOXES
+        # ───────────────────────────────────────────────────────────
+        options_frame = tk.Frame(main, bg=self.colors['white'])
+        options_frame.grid(row=12, column=0, columnspan=3, sticky='w', pady=10)
+        
+        # Date Filter Toggle
+        self.use_date_filter = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            options_frame,
+            text="✓ Enable Date Range Filter",
+            variable=self.use_date_filter,
+            font=('Arial', 9, 'bold'),
+            bg=self.colors['white'],
+            fg=self.colors['green'],
+            selectcolor=self.colors['yellow'],
+            activebackground=self.colors['white']
+        ).pack(anchor='w', pady=2)
+        
+        # Overwrite Toggle
+        self.overwrite_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            options_frame,
+            text="⚠️  Overwrite existing files (uncheck to skip duplicates)",
+            variable=self.overwrite_var,
+            font=('Arial', 9),
+            bg=self.colors['white'],
+            fg=self.colors['accent'],
+            selectcolor=self.colors['yellow'],
+            activebackground=self.colors['white']
+        ).pack(anchor='w', pady=2)
+        
+        # Separator
+        self.create_separator(main, 13)
+        
+        # ───────────────────────────────────────────────────────────
+        # PROGRESS SECTION
+        # ───────────────────────────────────────────────────────────
+        progress_container = tk.Frame(main, bg=self.colors['bg'], bd=0)
+        progress_container.grid(row=14, column=0, columnspan=3, sticky='ew', pady=15, ipady=15, ipadx=20)
+        
+        self.progress_label = tk.Label(
+            progress_container,
+            text="Ready to extract invoices",
+            font=('Arial', 11, 'bold'),
+            bg=self.colors['bg'],
+            fg=self.colors['text']
+        )
+        self.progress_label.pack(pady=(5, 8))
+        
+        # Progress Bar
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure(
+            "IIL.Horizontal.TProgressbar",
+            troughcolor=self.colors['white'],
+            background=self.colors['green'],
+            bordercolor=self.colors['green'],
+            lightcolor=self.colors['yellow'],
+            darkcolor=self.colors['accent'],
+            borderwidth=1,
+            thickness=28
+        )
+        
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(
+            progress_container,
+            variable=self.progress_var,
+            maximum=100,
+            style="IIL.Horizontal.TProgressbar",
+            length=650
+        )
+        self.progress_bar.pack(pady=5)
+        
+        # Percentage Display
+        self.percent_label = tk.Label(
+            progress_container,
+            text="0%",
+            font=('Arial', 13, 'bold'),
+            bg=self.colors['bg'],
+            fg=self.colors['green']
+        )
+        self.percent_label.pack(pady=(5, 5))
+        
+        # ───────────────────────────────────────────────────────────
+        # ACTION BUTTON
+        # ───────────────────────────────────────────────────────────
+        extract_btn = tk.Button(
+            main,
+            text="🚀 START EXTRACTION",
+            font=('Arial', 14, 'bold'),
+            bg=self.colors['green'],
+            fg=self.colors['white'],
+            activebackground=self.colors['yellow'],
+            activeforeground=self.colors['text'],
+            cursor='hand2',
+            bd=0,
+            padx=50,
+            pady=18,
+            command=self.extract_invoices
+        )
+        extract_btn.grid(row=15, column=0, columnspan=3, pady=15)
+        
+        # Button Hover Effects
+        def on_enter(e):
+            extract_btn.config(bg=self.colors['yellow'], fg=self.colors['text'])
+        
+        def on_leave(e):
+            extract_btn.config(bg=self.colors['green'], fg=self.colors['white'])
+        
+        extract_btn.bind('<Enter>', on_enter)
+        extract_btn.bind('<Leave>', on_leave)
+        
+        # ═══════════════════════════════════════════════════════════
+        # FOOTER
+        # ═══════════════════════════════════════════════════════════
+        footer = tk.Frame(self.root, bg=self.colors['green'], height=35)
+        footer.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        tk.Label(
+            footer,
+            text="© 2025 International Industries Limited | Powered by Advanced AI",
+            font=('Arial', 8),
+            bg=self.colors['green'],
+            fg=self.colors['white']
+        ).pack(pady=10)
+        
+        # Configure grid weights
+        main.grid_columnconfigure(0, weight=1)
+    
+    def create_section_header(self, parent, text, row):
+        """Create a section header with IIL green color"""
+        label = tk.Label(
+            parent,
+            text=text,
+            font=('Arial', 11, 'bold'),
+            bg=self.colors['white'],
+            fg=self.colors['green']
+        )
+        label.grid(row=row, column=0, sticky='w', pady=(12, 5))
+    
+    def create_separator(self, parent, row):
+        """Create a visual separator"""
+        sep = tk.Frame(parent, bg=self.colors['bg'], height=2)
+        sep.grid(row=row, column=0, columnspan=3, sticky='ew', pady=15)
+    
+    def create_folder_input(self, parent, row, command):
+        """Create folder input with browse button"""
+        entry = tk.Entry(
+            parent,
+            font=('Arial', 10),
+            bd=0,
+            relief=tk.FLAT,
+            highlightthickness=2,
+            highlightbackground=self.colors['bg'],
+            highlightcolor=self.colors['green']
+        )
+        entry.grid(row=row, column=0, columnspan=2, sticky='ew', pady=5, ipady=9)
+        
+        btn = tk.Button(
+            parent,
+            text="📁 Browse",
+            font=('Arial', 9, 'bold'),
+            bg=self.colors['white'],
+            fg=self.colors['green'],
+            activebackground=self.colors['green'],
+            activeforeground=self.colors['white'],
+            cursor='hand2',
+            bd=1,
+            relief=tk.SOLID,
+            highlightbackground=self.colors['green'],
+            padx=22,
+            pady=7,
+            command=command
+        )
+        btn.grid(row=row, column=2, padx=(12, 0), pady=5)
+        
+        return entry
+    
+    def browse_source(self):
+        folder = filedialog.askdirectory(title="Select Source Folder (Invoices)")
+        if folder:
+            self.source_entry.delete(0, tk.END)
+            self.source_entry.insert(0, folder)
+    
+    def browse_destination(self):
+        folder = filedialog.askdirectory(title="Select Destination Folder")
+        if folder:
+            self.dest_entry.delete(0, tk.END)
+            self.dest_entry.insert(0, folder)
+    
+    def extract_date_from_pdf(self, pdf_path):
+        """Extract invoice date from PDF content"""
+        try:
+            doc = fitz.open(pdf_path)
+            text = ""
+            for page in doc:
+                text += page.get_text()
+            doc.close()
+            
+            # Date patterns (DD/MM/YYYY, YYYY-MM-DD, etc.)
+            patterns = [
+                r'\b(\d{1,2}[/-]\d{1,2}[/-]\d{4})\b',
+                r'\b(\d{4}[/-]\d{1,2}[/-]\d{1,2})\b',
+                r'\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})\b'
+            ]
+            
+            for pattern in patterns:
+                matches = re.findall(pattern, text, re.IGNORECASE)
+                if matches:
+                    date_str = matches[0]
+                    for fmt in ['%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d', '%Y-%m-%d', '%d %B %Y', '%d %b %Y']:
+                        try:
+                            return datetime.strptime(date_str, fmt)
+                        except:
+                            continue
+            return None
+        except:
+            return None
+    
+    def extract_invoices(self):
+        """Main extraction logic"""
+        source = self.source_entry.get().strip()
+        destination = self.dest_entry.get().strip()
+        search_value = self.search_entry.get().strip().lower()
+        
+        # Validation
+        if not source or not destination or not search_value:
             messagebox.showwarning(
-                "No Matches",
-                f"No invoices found for: {self.customer_filter.get()}\n\nTry adjusting the customer name or account ID."
+                "⚠️ Missing Information",
+                "Please fill in all required fields:\n• Source Folder\n• Destination Folder\n• Search Value"
             )
-    
-    def show_result(self, message, msg_type):
-        self.root.after(0, lambda: self._show_result(message, msg_type))
-    
-    def _show_result(self, message, msg_type):
-        self.progress.stop()
-        self.extract_btn.config(state=tk.NORMAL)
-        self.status_label.config(text="Ready to extract invoices", fg="gray")
+            return
         
-        if msg_type == "error":
-            messagebox.showerror("Error", message)
-        else:
-            messagebox.showinfo("Success", message)
-
-def main():
-    root = tk.Tk()
-    app = InvoiceExtractorApp(root)
-    root.mainloop()
+        if not os.path.exists(source):
+            messagebox.showerror("❌ Error", "Source folder does not exist!")
+            return
+        
+        if not os.path.exists(destination):
+            try:
+                os.makedirs(destination)
+            except:
+                messagebox.showerror("❌ Error", "Cannot create destination folder!")
+                return
+        
+        # Get settings
+        filter_type = self.filter_var.get()
+        use_date = self.use_date_filter.get()
+        overwrite = self.overwrite_var.get()
+        from_date = self.from_date.get_date() if use_date else None
+        to_date = self.to_date.get_date() if use_date else None
+        
+        # Get PDF files
+        pdf_files = [f for f in os.listdir(source) if f.lower().endswith('.pdf')]
+        total_files = len(pdf_files)
+        
+        if total_files == 0:
+            messagebox.showinfo("ℹ️ No Files", "No PDF files found in the source folder!")
+            return
+        
+        # Initialize counters
+        extracted = 0
+        skipped_date = 0
+        skipped_duplicate = 0
+        errors = 0
+        
+        # Process each PDF
+        for idx, filename in enumerate(pdf_files, 1):
+            pdf_path = os.path.join(source, filename)
+            
+            # Update progress
+            progress = (idx / total_files) * 100
+            self.progress_var.set(progress)
+            self.percent_label.config(text=f"{int(progress)}%")
+            
+            # Truncate long filenames for display
+            display_name = filename[:45] + "..." if len(filename) > 45 else filename
+            self.progress_label.config(text=f"Processing: {display_name}")
+            self.root.update_idletasks()
+            
+            try:
+                # Extract text from PDF
+                doc = fitz.open(pdf_path)
+                text = ""
+                for page in doc:
+                    text += page.get_text().lower()
+                doc.close()
+                
+                # Check if search value matches
+                match_found = False
+                if filter_type == "name" and search_value in text:
+                    match_found = True
+                elif filter_type == "account" and search_value in text:
+                    match_found = True
+                
+                # Apply date filter if enabled
+                if match_found and use_date:
+                    pdf_date = self.extract_date_from_pdf(pdf_path)
+                    if pdf_date:
+                        if not (from_date <= pdf_date.date() <= to_date):
+                            match_found = False
+                            skipped_date += 1
+                    else:
+                        # No date found in PDF
+                        match_found = False
+                        skipped_date += 1
+                
+                # Copy file if matched
+                if match_found:
+                    dest_path = os.path.join(destination, filename)
+                    
+                    # Handle duplicates
+                    if os.path.exists(dest_path) and not overwrite:
+                        skipped_duplicate += 1
+                    else:
+                        shutil.copy2(pdf_path, dest_path)
+                        extracted += 1
+            
+            except Exception as e:
+                errors += 1
+                print(f"Error processing {filename}: {e}")
+        
+        # Reset progress UI
+        self.progress_var.set(100)
+        self.percent_label.config(text="100% ✓", fg=self.colors['green'])
+        self.progress_label.config(text="✅ Extraction Complete!")
+        
+        # Build results message
+        result = "╔═══════════════════════════════════════╗\n"
+        result += "║      EXTRACTION COMPLETE      ║\n"
+        result += "╚═══════════════════════════════════════╝\n\n"
+        result += f"📊 Total PDFs Scanned: {total_files}\n"
+        result += f"✅ Invoices Extracted: {extracted}\n"
+        
+        if skipped_duplicate > 0:
+            result += f"⏭️  Skipped (Already Exists): {skipped_duplicate}\n"
+        
+        if use_date and skipped_date > 0:
+            result += f"📅 Filtered by Date: {skipped_date}\n"
+        
+        if errors > 0:
+            result += f"⚠️  Errors Encountered: {errors}\n"
+        
+        result += f"\n📂 Location:\n{destination}"
+        
+        messagebox.showinfo("✅ Success", result)
+        
+        # Reset progress after a delay
+        self.root.after(2000, lambda: [
+            self.progress_var.set(0),
+            self.percent_label.config(text="0%", fg=self.colors['green']),
+            self.progress_label.config(text="Ready to extract invoices")
+        ])
 
 if __name__ == "__main__":
-    main()
+    root = tk.Tk()
+    app = IILInvoiceExtractor(root)
+    root.mainloop()
+
